@@ -4,6 +4,8 @@ import socket
 import sys
 import time
 
+debug = True
+
 class Process():
     def __init__(self, index, ip, port):
         self.index = int(index)
@@ -19,10 +21,12 @@ class Server():
         self.connections = {}
         self.state = 'Normal'
         self.leader = max(self.hosts.keys())
+        self.prevleader = self.leader
         self.upList = []
         for index, host in self.hosts.iteritems():
             self.upList.append(int(index))
-        print "up: ", self.upList
+        if debug:
+            print "up: ", self.upList
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((ip, port))
         
@@ -30,14 +34,24 @@ class Server():
         pass
 
     def leader_msg(self):
+        data, addr = self.recv(1)
+        if data != None and "leader" in data: # another process is leader
+            if self.addr_to_index(addr) > self.index:
+                self.leader = self.addr_to_index(addr)
+                return
         for index, proc in self.hosts.iteritems():
             if index != self.index:
-                print "sending i am leader to {0}, up: {1}".format(index, self.upList)
-                self.sock.sendto("{0}: i am the leader".format(self.index), (proc.ip, proc.port))
+                if self.prevleader != self.leader:
+                    print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
+                    self.prevleader = self.leader
 
+                if debug:
+                    print "sending i am leader to {0}, up: {1}".format(index, self.upList)
+                self.sock.sendto("{0}: i am the leader".format(self.index), (proc.ip, proc.port))
+        
         time.sleep(1)
         self.start()
-
+    
     def start(self):
         responses = []
         if self.leader == self.index:
@@ -47,20 +61,28 @@ class Server():
             if data == None: # at this point, there is no coordinator
                 self.no_leader()
             elif "election" in data:
-                if max(upList) == self.index:
+                if max(self.upList) == self.index:
                     self.become_leader()
                 self.send_ok(self.addr_to_index(addr))
                 self.no_leader()
             elif "leader" in data:
-                self.leader = self.addr_to_index(addr)
+                if self.addr_to_index(addr) < self.index:
+                    return
+                if self.leader != self.addr_to_index(addr):
+                    self.leader = self.addr_to_index(addr)
+                if self.leader != self.prevleader:
+                    self.prevleader = self.leader
+                    print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
                 self.send_ok(self.leader)
-                print "{0} is leader :)".format(self.addr_to_index(addr))
+                if debug:
+                    print "{0} is leader :)".format(self.addr_to_index(addr))
             elif "alive" in data:
-                print "alive??"
+                if debug:
+                    print "alive??"
             self.start()
 
     def no_leader(self):
-        print "no leader detected, up: ", self.upList
+        print "[{0}] Node {1}: leader node {2} has crashed.".format(getTime(), self.index, self.leader)
         if int(self.leader) in self.upList:
             self.upList.remove(int(self.leader))
         for index, proc in self.hosts.iteritems():
@@ -84,6 +106,9 @@ class Server():
 
     def become_leader(self):
         self.leader = self.index
+        if self.prevleader != self.leader:
+            print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
+            self.prevleader = self.leader
         self.start()
 
     def recv(self, t=2):
@@ -91,7 +116,8 @@ class Server():
         try:
             data, addr = self.sock.recvfrom(1024)
         except socket.timeout:
-            print "Timeout!"
+            if debug:
+                print "Timeout!"
             return None, None
 
         self.sock.settimeout(None)
@@ -111,6 +137,8 @@ class Server():
                 return index
         return -1
 
+def getTime():
+    return time.strftime('%H:%M:%S', time.localtime())
 
 
 def fillHosts(fileName):
