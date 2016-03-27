@@ -43,9 +43,9 @@ class Server():
         if data != None and "leader" in data: # another process is leader
             #print data
             if self.data_to_index(data) > self.index:
-                print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.data_to_index(data))
                 self.leader = self.data_to_index(data)
-                self.start()
+                print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.data_to_index(data))
+                return
         for index, proc in self.hosts.iteritems():
             if index != self.index:
                 if debug:
@@ -128,7 +128,6 @@ class Server():
         if self.prevleader != self.leader:
 
             print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
-            self.lasttime = int(time.time())
             self.prevleader = self.leader
 
     def recv(self, t=2):
