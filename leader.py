@@ -22,6 +22,7 @@ class Server():
         self.state = 'Normal'
         self.election = False
         self.leader = max(self.hosts.keys())
+        self.leaders = []
         self.prevleader = self.leader
         self.upList = []
         self.lasttime = int(time.time())
@@ -33,30 +34,25 @@ class Server():
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((ip, port))
         if debug:
-            print "starting"       
-        self.start()
+            print "starting"     
+        while True:
+            self.start()
 
     def leader_msg(self):
         data, addr = self.recv(1)
         if data != None and "leader" in data: # another process is leader
+            #print data
             if self.data_to_index(data) > self.index:
+                print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.data_to_index(data))
                 self.leader = self.data_to_index(data)
                 self.start()
         for index, proc in self.hosts.iteritems():
-            if index < self.index:
-                continue
             if index != self.index:
-                if self.prevleader != self.leader:
-                    print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
-                    self.prevleader = self.leader
-
-
                 if debug:
                     print "sending i am leader to {0}, up: {1}".format(index, self.upList)
                 self.sock.sendto("{0} i am the leader".format(self.index), (proc.ip, proc.port))
         
         time.sleep(1)
-        self.start()
     
     def start(self):
         responses = []
@@ -69,29 +65,32 @@ class Server():
             elif "election" in data:
                 if max(self.upList) == self.index:
                     self.become_leader()
+                    return
                 self.send_ok(self.data_to_index(data))
                 self.no_leader()
             elif "leader" in data:
                 if self.data_to_index(data) < self.index:
                     self.become_leader()
+                    return
+
                 if self.leader != self.data_to_index(data):
-                    self.leader = self.data_to_index(data)
+                    print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.data_to_index(data))
+
+                self.leader = self.data_to_index(data)
+
                 if self.prevleader != self.leader:
                     self.prevleader = self.leader
 
                 self.send_ok(self.leader)
-                if self.data_to_index(data) != self.lastack:
-                    print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
-                self.lastack = self.data_to_index(data)
                 if debug:
                     print "{0} is leader :)".format(self.data_to_index(data))
             elif "alive" in data:
                 if debug:
                     print "alive??"
-            self.start()
 
     def no_leader(self):
         print "[{0}] Node {1}: leader node {2} has crashed.".format(getTime(), self.index, self.leader)
+        print "[{0}] Node {1}: begin another leader election.".format(getTime(), self.index, self.leader)
         self.election = False
         if int(self.leader) in self.upList:
             self.upList.remove(int(self.leader))
@@ -110,6 +109,7 @@ class Server():
             print responses
         if len(responses) == 0:
             self.become_leader()
+            return
         else:
             ids = [-1]
             for res in responses:
@@ -121,16 +121,13 @@ class Server():
                 ids.append(s)
             if self.index >= max(ids):
                 self.become_leader()
-
+                return
 
     def become_leader(self):
         self.leader = self.index
-        if self.prevleader != self.leader and int(time.time()) > self.lasttime + 5:
+        if self.prevleader != self.leader:
 
-            print "[{0}] Node {1}: begin another leader election.".format(getTime(), self.index)
             print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
-            for index, proc in self.hosts.iteritems():
-                self.sock.sendto("{0} i am the leader".format(self.index), (proc.ip, proc.port))
             self.lasttime = int(time.time())
             self.prevleader = self.leader
 
