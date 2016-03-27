@@ -1,3 +1,4 @@
-1 127.0.0.1 1330
-2 127.0.0.1 1331
-3 127.0.0.1 1332
+1 xinu04.cs.purdue.edu
+2 xinu02.cs.purdue.edu
+3 xinu06.cs.purdue.edu
+4 xinu07.cs.purdue.edu

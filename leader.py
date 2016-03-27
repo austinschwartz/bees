@@ -4,7 +4,7 @@ import socket
 import sys
 import time
 
-debug = True
+debug = False
 
 class Process():
     def __init__(self, index, ip, port):
@@ -14,40 +14,46 @@ class Process():
 
 class Server():
     def __init__(self, index, ip, port, hosts):
-        self.index = index
+        self.index = int(index)
         self.ip = ip
         self.port = port
         self.hosts = hosts
         self.connections = {}
         self.state = 'Normal'
+        self.election = False
         self.leader = max(self.hosts.keys())
         self.prevleader = self.leader
         self.upList = []
+        self.lasttime = int(time.time())
+        self.lastack = -1
         for index, host in self.hosts.iteritems():
             self.upList.append(int(index))
         if debug:
             print "up: ", self.upList
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((ip, port))
-        
+        if debug:
+            print "starting"       
         self.start()
-        pass
 
     def leader_msg(self):
         data, addr = self.recv(1)
         if data != None and "leader" in data: # another process is leader
-            if self.addr_to_index(addr) > self.index:
-                self.leader = self.addr_to_index(addr)
-                return
+            if self.data_to_index(data) > self.index:
+                self.leader = self.data_to_index(data)
+                self.start()
         for index, proc in self.hosts.iteritems():
+            if index < self.index:
+                continue
             if index != self.index:
                 if self.prevleader != self.leader:
                     print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
                     self.prevleader = self.leader
 
+
                 if debug:
                     print "sending i am leader to {0}, up: {1}".format(index, self.upList)
-                self.sock.sendto("{0}: i am the leader".format(self.index), (proc.ip, proc.port))
+                self.sock.sendto("{0} i am the leader".format(self.index), (proc.ip, proc.port))
         
         time.sleep(1)
         self.start()
@@ -63,19 +69,22 @@ class Server():
             elif "election" in data:
                 if max(self.upList) == self.index:
                     self.become_leader()
-                self.send_ok(self.addr_to_index(addr))
+                self.send_ok(self.data_to_index(data))
                 self.no_leader()
             elif "leader" in data:
-                if self.addr_to_index(addr) < self.index:
-                    return
-                if self.leader != self.addr_to_index(addr):
-                    self.leader = self.addr_to_index(addr)
-                if self.leader != self.prevleader:
+                if self.data_to_index(data) < self.index:
+                    self.become_leader()
+                if self.leader != self.data_to_index(data):
+                    self.leader = self.data_to_index(data)
+                if self.prevleader != self.leader:
                     self.prevleader = self.leader
-                    print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
+
                 self.send_ok(self.leader)
+                if self.data_to_index(data) != self.lastack:
+                    print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
+                self.lastack = self.data_to_index(data)
                 if debug:
-                    print "{0} is leader :)".format(self.addr_to_index(addr))
+                    print "{0} is leader :)".format(self.data_to_index(data))
             elif "alive" in data:
                 if debug:
                     print "alive??"
@@ -83,6 +92,7 @@ class Server():
 
     def no_leader(self):
         print "[{0}] Node {1}: leader node {2} has crashed.".format(getTime(), self.index, self.leader)
+        self.election = False
         if int(self.leader) in self.upList:
             self.upList.remove(int(self.leader))
         for index, proc in self.hosts.iteritems():
@@ -95,21 +105,34 @@ class Server():
         responses = []
         while data != None:
             data, addr = self.recv()
-            responses += (data, addr)
-        print responses
+            responses.append((data, addr))
+        if debug:
+            print responses
         if len(responses) == 0:
             self.become_leader()
         else:
-            if max(self.upList) == self.index:
+            ids = [-1]
+            for res in responses:
+                if res[0] == None:
+                    continue
+                s = int(res[0].split(' ')[0])
+                if debug:
+                    print s
+                ids.append(s)
+            if self.index >= max(ids):
                 self.become_leader()
 
 
     def become_leader(self):
         self.leader = self.index
-        if self.prevleader != self.leader:
+        if self.prevleader != self.leader and int(time.time()) > self.lasttime + 5:
+
+            print "[{0}] Node {1}: begin another leader election.".format(getTime(), self.index)
             print "[{0}] Node {1}: node {2} is elected as new leader.".format(getTime(), self.index, self.leader)
+            for index, proc in self.hosts.iteritems():
+                self.sock.sendto("{0} i am the leader".format(self.index), (proc.ip, proc.port))
+            self.lasttime = int(time.time())
             self.prevleader = self.leader
-        self.start()
 
     def recv(self, t=2):
         self.sock.settimeout(t)
@@ -125,23 +148,26 @@ class Server():
 
     def send_election(self, index):
         proc = self.hosts[index]
-        self.sock.sendto("election from {0}".format(self.index), (proc.ip, proc.port))
+        self.sock.sendto("{0} election".format(self.index), (proc.ip, proc.port))
 
     def send_ok(self, index):
         proc = self.hosts[index]
-        self.sock.sendto("ok from {0}".format(self.index), (proc.ip, proc.port))
+        self.sock.sendto("{0} ok".format(self.index), (proc.ip, proc.port))
 
     def addr_to_index(self, addr):
         for index, proc in self.hosts.iteritems():
-            if proc.ip == addr[0] and int(proc.port) == int(addr[1]):
+            if proc.ip == addr[0]:
                 return index
         return -1
+
+    def data_to_index(self, data):
+        return int(data.split(' ')[0])
 
 def getTime():
     return time.strftime('%H:%M:%S', time.localtime())
 
 
-def fillHosts(fileName):
+def fillHosts(fileName, p):
     hosts = {}
     f = open(fileName)
     lines = f.read().strip().split('\n')
@@ -149,7 +175,7 @@ def fillHosts(fileName):
         line = line.split(' ')
         index = int(line[0])
         host = line[1]
-        port = int(line[2])
+        port = p
         hosts[index] = Process(index, host, port)
     return hosts
 
@@ -169,13 +195,9 @@ if __name__ == '__main__':
     if len(a) >= 6:
         args[a[4]] = a[5]
     port = int(args['-p'])
-    hosts = fillHosts(args['-h'])
-    #
-    #for index, proc in hosts:
-    #    # update later
-    #    if proc.port == port:
-    # addr = socket.gethostbyname(socket.gethostname()
-    ip = "127.0.0.1"
-    index = getIndex(ip, port, hosts)
+    hosts = fillHosts(args['-h'], port)
+    ip = socket.gethostname()
+
+    index = int(getIndex(ip, port, hosts))
     s = Server(index, ip, port, hosts)
     s.start()
